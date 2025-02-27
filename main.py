@@ -2,6 +2,10 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
+#Testing vars
+Verbose = True
+Testing = True
+
 
 profile_name = 'zedvanzed'
 base_url = 'https://letterboxd.com'
@@ -15,8 +19,13 @@ def clean_url(url):
 def get_profile(profile_name):
 
     profile_r = requests.get(f'{base_url}/{profile_name}/films/diary/')
-    soup = BeautifulSoup(profile_r.content, "html.parser")
-    return soup
+
+    if profile_r.status_code != 200:
+        print("Error:", profile_r.status_code, "while fetching", f'{base_url}/{profile_name}/films/diary/')
+        return None
+    else:
+        soup = BeautifulSoup(profile_r.content, "html.parser")
+        return soup
 
 
 def get_diary_urls(profile_soup):
@@ -41,7 +50,9 @@ def scrape_all_pages(profile_name):
 
     while profile_soup:
         page_count += 1
-        print(f'Scraping page {page_count}...')
+        if Verbose:
+            print(f'Scraping page {page_count}...')
+
         # Extract diary URLs from the current page
         all_diary_urls.extend(get_diary_urls(profile_soup))
         
@@ -54,10 +65,12 @@ def scrape_all_pages(profile_name):
         response = requests.get(next_page_url)
         profile_soup = BeautifulSoup(response.text, 'html.parser')
 
+    print(f'Scraped {page_count} pages')
+
     return all_diary_urls
 
 def get_movie_data(url):
-    print(f'Getting data from {url}')
+    #print(f'Getting data from {url}')
     
     r = requests.get(url)
     
@@ -72,11 +85,18 @@ def get_movie_data(url):
         element = soup.select_one(selector)
         return element.get_text(separator, strip=True) if element else default
 
+
+
+    # Extract rating (Letterboxd uses a span with 'rating' class)
+    rating_element = soup.select_one('.rating')
+    rating = rating_element.get_text(strip=True) if rating_element else "No Rating"
+
     return {
         'title': safe_get_text('#film-page-wrapper h1', 'Unknown Title'),
         'cast': safe_get_text('#tab-cast p', 'No Cast Listed'),
         'details': safe_get_text('#tab-details p', 'No Details Available'),
         'genres': safe_get_text('#tab-genres p', 'No Genres Available'),
+        'rating': rating,
         'url': url
     }
 
@@ -84,7 +104,30 @@ def get_movie_data(url):
 
 def main():
 
-    profile_soup = get_profile(profile_name) #
+    profile_soup = None
+
+    while profile_soup is None:
+
+        if Testing:
+            print("Testing mode is on")
+            profile_name = 'zedvanzed'
+            break
+
+        print("what is your Letterboxd username?")
+
+        profile_name = input()
+
+        profile_soup = get_profile(profile_name) 
+
+        #if profile is not found
+        if profile_soup is None:
+            print("Profile not found")
+        else:
+            break
+
+            
+
+
 
     # diary_urls = get_diary_urls(profile_soup) #Page 1
 
@@ -100,6 +143,10 @@ def main():
     print("getting movie data...")
     data = []
     movie_count = 0
+
+
+    max_movies = 10
+
     for url in diary_urls:
         movie_count += 1
 
@@ -119,19 +166,37 @@ def main():
             else:
                 print(f'Error: {url}')
 
-
-    # for movie in data:
-    #     print(movie)
-    #     print('\n\n')
-
-
+        if Testing and movie_count >= max_movies:
+            break
 
 
     #Get Number of movies in each genre
     total_genres = 0
+    total_actors = 0
 
     genre_count = {}
+    actor_count = {}
+    
+
+
+
+    #set data to a smaller list for testing
+    if Testing:
+        data = data[:10]
+        num_movies = len(data)
+
+    count = 0
+
+    print("getting ")
+
     for movie in data:
+        count += 1
+
+        if Verbose:
+            print("Getting data for", movie['title'], "(" + str(count) + "/" + str(num_movies) + ")")
+           
+
+        #Genres
         genres = movie['genres'].split(',')
         for genre in genres:
             if genre in genre_count: #if genre is already in the dictionary
@@ -141,61 +206,57 @@ def main():
                 total_genres += 1
 
 
-    #get percentage of each genre
-    genre_percents = {}
-    for genre, count in genre_count.items():
-        genre_percents[genre] = count / movie_count * 100
-        
-
-    #print highest genre to lowest
-    sorted_genres = sorted(genre_count.items(), key=lambda x: x[1], reverse=True)
-    sorted_genre_percents = sorted(genre_percents.items(), key=lambda x: x[1], reverse=True)
-
-    #print top 5 in a niceformat with percent
-    for genre, count in sorted_genres[:5]:
-        print(genre,": ", count, "movies", "(", genre_percents[genre], "%)")
-    #Get a list of attributes for each movie
-    attributes = set()
-    for movie in data:
-        for key in movie:
-            attributes.add(key)
-
-
-    #most viewed actors
-    actor_count = {}
-    for movie in data:
+        #Actors
         actors = movie['cast'].split(',')
         for actor in actors:
+
+            actor = actor.strip() #remove leading and trailing whitespace
+
+            if actor == "Show All…":
+                continue
+            if actor == "Jr.":
+                continue
+
             if actor in actor_count:
                 actor_count[actor] += 1
             else:
                 actor_count[actor] = 1
+                total_actors += 1
+
+
+
+
+    #get percentage of each genre
+    genre_percents = {}
+    for genre, count in genre_count.items():
+        #round to two decimal places
+        genre_percents[genre] = round(count / movie_count * 100, 2)
 
 
     #percent of movies each actor is in
     actor_percents = {}
     for actor, count in actor_count.items():
-        actor_percents[actor] = count / movie_count * 100
+        actor_percents[actor] = round(count / movie_count * 100,2)
 
+    #sort lists
+    sorted_genres = sorted(genre_count.items(), key=lambda x: x[1], reverse=True)
     sorted_actors = sorted(actor_count.items(), key=lambda x: x[1], reverse=True)
 
+    print("Your 5 most watched genres are:")
+    for genre, count in sorted_genres[:5]:
+        print(genre,": ", count, "movies", "(", genre_percents[genre], "%)")
+
+    print("\nYour 5 most watched actors are:")
     for actor, count in sorted_actors[:5]:
         print(actor,": ", count, "movies", "(", actor_percents[actor], "%)")
-        
 
 
-
-    #print attributes oine per row
-    for attribute in attributes:
-        print(attribute)
-
-    # #print highest rated movie
-    # print(max(data, key=lambda x: x['rating']))
-
-    # #printy lowest rated movie
-    # print(min(data, key=lambda x: x['rating']))
-
-
+    # #print all attributes of the movies
+    # if Verbose:
+    #     for movie in data:
+    #         print("\n")
+    #         for key, value in movie.items():
+    #             print(key, ":", value)
 
 if __name__ == '__main__':
     main()
