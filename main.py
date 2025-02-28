@@ -1,3 +1,7 @@
+#Scraping HTML since letterboxd's API is not available for personal projects
+#So it will be a bit slow
+
+
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -340,12 +344,15 @@ def main():
     genre_count = {}
     actor_count = {}
     
-    top_rated_movies = []
+
     top_rated_actors = []
     top_rated_genres = []
 
-    top_average_rated_movies = []
+    max_above_average = {'title': 'None', 'diff': 0}
+    max_below_average = {'title': 'None', 'diff': 0}
 
+    top_rated_movies = []
+    top_average_rated_movies = []
     #initialize top rated movies
     for i in range(5):
         top_rated_movies.append({'title': 'None', 'rating': 0})
@@ -358,10 +365,6 @@ def main():
     #     num_movies = len(data)
 
     count = 0
-
-    print("getting ")
-
-    print(data)
 
     for movie_title in data:
         count += 1
@@ -404,6 +407,9 @@ def main():
             if user_rating > top_rated_movies[4]['rating']:
                 top_rated_movies[4] = {'title': movie['title'], 'rating': user_rating}
                 top_rated_movies.sort(key=lambda x: x['rating'], reverse=True)
+        else:
+            if Verbose:
+                print("User has not rated", movie['title'])
 
         #Average Rating
         #average_rating = rating_to_number(movie['average_rating'])
@@ -413,6 +419,24 @@ def main():
             if average_rating > top_average_rated_movies[4]['rating']:
                 top_average_rated_movies[4] = {'title': movie['title'], 'rating': average_rating}
                 top_average_rated_movies.sort(key=lambda x: x['rating'], reverse=True)
+        else:
+            print("No average rating for", movie['title'])
+
+        if user_rating is not None and average_rating is not None:
+            # diff_from_average = {'title': movie['title'], 'diff': abs(user_rating - average_rating)}
+            # if diff_from_average['diff'] > max_diff_from_average['diff']:
+            #     max_diff_from_average = diff_from_average
+
+            above_average = {'title': movie['title'], 'diff': user_rating - average_rating}
+            below_average = {'title': movie['title'], 'diff': average_rating - user_rating}
+
+            if above_average['diff'] > max_above_average['diff']:
+                max_above_average = above_average
+            if below_average['diff'] > max_below_average['diff']:
+                max_below_average = below_average
+            
+
+
 
 
 
@@ -444,12 +468,20 @@ def main():
 
     print("\nYour top 5 rated movies are:")
     for movie in top_rated_movies:
-        print(movie['title'], ": ", movie['rating'])
+        print(movie['title'], ": ", movie['rating'], "stars")
 
     print("\nYour top 5 average rated movies are:")
     for movie in top_average_rated_movies:
-        print(movie['title'], ": ", movie['rating'])
+        print(movie['title'], ": ", movie['rating'], "stars")
 
+
+    print("\nThe Movie you liked more than the average viewer is:")
+    print(max_above_average['title'], "by", round(max_above_average['diff'],1), "stars")
+    print("You rated it", rating_to_number(data[max_above_average['title']]['user_rating']), "stars and the average rating is", data[max_above_average['title']]['average_rating'], "stars")
+
+    print("\nThe Movie you liked less than the average viewer is:")
+    print(max_below_average['title'], "by", round(max_below_average['diff'],1), "stars")
+    print("You rated it", rating_to_number(data[max_below_average['title']]['user_rating']), "stars and the average rating is", data[max_below_average['title']]['average_rating'], "stars")
 
     # #print all attributes of the movies
     # if Verbose:
