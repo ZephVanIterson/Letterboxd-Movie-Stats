@@ -4,7 +4,7 @@ import re
 
 #Testing vars
 Verbose = False
-Testing = False
+Testing = True
 
 max_movies = 10
 
@@ -52,6 +52,11 @@ def rating_to_number(rating):
     else:
         return None
 
+def movie_to_histogram_url(movie_url):
+    """Converts a movie URL to a histogram URL."""
+    #ex. https://letterboxd.com/film/parasite/ -> https://letterboxd.com/csi/film/parasite/rating_histogram
+
+    return re.sub(r'/film/', '/csi/film/', movie_url) + 'rating-histogram/'
 
 def diary_to_movie_url(diary_url):
     """Converts a diary URL to a movie URL."""
@@ -134,13 +139,13 @@ def get_diary_entry_data(url):
     r.raise_for_status()  # Raise an exception for 4xx/5xx errors
     soup = BeautifulSoup(r.content, "html.parser")
 
-    rating_element = soup.select_one('.rating') #This is the most important line to change. Inspect the html of letterboxd diary pages, and change this selector.
-    rating = rating_element.get_text(strip=True) if rating_element else "No Rating"
+    user_rating_element = soup.select_one('.rating') #This is the most important line to change. Inspect the html of letterboxd diary pages, and change this selector.
+    user_rating = user_rating_element.get_text(strip=True) if user_rating_element else "No Rating"
 
     return {
         'title': soup.select_one('.film-poster img').get('alt'),
         'diary_url': url,
-        'rating': rating,
+        'user_rating': user_rating,
     }
 
 def get_movie_data(url):
@@ -160,9 +165,9 @@ def get_movie_data(url):
         element = soup.select_one(selector)
         return element.get_text(separator, strip=True) if element else default
 
+    # #average rating
+    # average_rating = soup.select_one('.average-rating').get_text(strip=True)
 
-    rating_element = soup.select_one('.rating')
-    rating = rating_element.get_text(strip=True) if rating_element else "No Rating"
 
     
     #This just grabs the most recent rating?
@@ -174,10 +179,24 @@ def get_movie_data(url):
         'cast': safe_get_text('#tab-cast p', 'No Cast Listed'),
         'details': safe_get_text('#tab-details p', 'No Details Available'),
         'genres': safe_get_text('#tab-genres p', 'No Genres Available'),
-        'movie_url': url
+        'movie_url': url,
     }
 
-def combine_data(movie_data, diary_data):
+def get_histogram_data(url):
+    r = requests.get(url)
+    r.raise_for_status()  # Raise an exception for 4xx/5xx errors
+    soup = BeautifulSoup(r.content, "html.parser")
+
+    #=IMPORTXML("https://letterboxd.com/csi/film/inception/rating-histogram/", "//span[@class='average-rating']")
+
+    #average rating
+    average_rating = soup.select_one('.average-rating').get_text(strip=True)
+
+    return {
+        'average_rating': average_rating
+    }
+
+def combine_data(movie_data, diary_data, diary_urls = None):
 
     #find matching pairs
 
@@ -244,18 +263,18 @@ def main():
     #print(diary_urls)
 
     print("getting movie data...")
+
+
+
+    #Get movie data
     movie_count = 0
-
-
-
     movie_data = []
-    diary_data = []
-
     for url in movie_urls:
         movie_count += 1
         if Verbose:
             print("Getting movie data for", url, "(" + str(movie_count) + "/" + str(num_movies) + ")")
         url = clean_url(url)
+        histogram_url = movie_to_histogram_url(url)
         
         #Check if Nonetype
         if url is None:
@@ -263,15 +282,32 @@ def main():
             print("URL is None")
             continue
         else:
-            temp = get_movie_data(url)
-            if temp:
-                movie_data.append(temp)
+
+            movie_entry = None
+
+            movie_info = get_movie_data(url)
+            if movie_info:
+                #movie_data.append(temp)
+                movie_entry = movie_info
             else:
                 print(f'Error: {url}')
 
+
+            histogram_info = get_histogram_data(histogram_url)
+            if histogram_info:
+                movie_entry = {**movie_entry, **histogram_info}
+            else:
+                print(f'Error: {url}')
+
+            if movie_entry:
+                movie_data.append(movie_entry)
+            
+
         if Testing and movie_count >= max_movies:
             break
-
+            
+    #Get diary data
+    diary_data = []
     diary_count = 0
     for url in diary_urls:
         diary_count += 1
@@ -308,9 +344,12 @@ def main():
     top_rated_actors = []
     top_rated_genres = []
 
+    top_average_rated_movies = []
+
     #initialize top rated movies
     for i in range(5):
         top_rated_movies.append({'title': 'None', 'rating': 0})
+        top_average_rated_movies.append({'title': 'None', 'rating': 0})
 
 
     #set data to a smaller list for testing
@@ -359,12 +398,21 @@ def main():
                 actor_count[actor] = 1
                 total_actors += 1
 
-        #Rating
-        rating = rating_to_number(movie['rating'])
-        if rating is not None:
-            if rating > top_rated_movies[4]['rating']:
-                top_rated_movies[4] = {'title': movie['title'], 'rating': rating}
+        #user's Rating
+        user_rating = rating_to_number(movie['user_rating'])
+        if user_rating is not None:
+            if user_rating > top_rated_movies[4]['rating']:
+                top_rated_movies[4] = {'title': movie['title'], 'rating': user_rating}
                 top_rated_movies.sort(key=lambda x: x['rating'], reverse=True)
+
+        #Average Rating
+        #average_rating = rating_to_number(movie['average_rating'])
+        average_rating = movie['average_rating']
+        if average_rating is not None:
+            average_rating = float(average_rating)
+            if average_rating > top_average_rated_movies[4]['rating']:
+                top_average_rated_movies[4] = {'title': movie['title'], 'rating': average_rating}
+                top_average_rated_movies.sort(key=lambda x: x['rating'], reverse=True)
 
 
 
@@ -396,6 +444,10 @@ def main():
 
     print("\nYour top 5 rated movies are:")
     for movie in top_rated_movies:
+        print(movie['title'], ": ", movie['rating'])
+
+    print("\nYour top 5 average rated movies are:")
+    for movie in top_average_rated_movies:
         print(movie['title'], ": ", movie['rating'])
 
 
