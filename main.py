@@ -8,7 +8,7 @@ import re
 
 #Testing vars
 Verbose = False
-Testing = True
+Testing = False
 
 max_movies = 10
 
@@ -133,7 +133,7 @@ def scrape_all_pages(profile_name):
         response = requests.get(next_page_url)
         profile_soup = BeautifulSoup(response.text, 'html.parser')
 
-    print("Your diary is ", page_count, "pages")
+    #print("Your diary is ", page_count, "pages")
 
     return all_diary_urls
 
@@ -193,8 +193,18 @@ def get_histogram_data(url):
 
     #=IMPORTXML("https://letterboxd.com/csi/film/inception/rating-histogram/", "//span[@class='average-rating']")
 
+    def safe_get_text(selector, default="N/A", separator=","):
+        element = soup.select_one(selector)
+        return element.get_text(separator, strip=True) if element else default
+
     #average rating
-    average_rating = soup.select_one('.average-rating').get_text(strip=True)
+    average_rating_element = soup.select_one('.average-rating')
+    if average_rating_element is None:
+        average_rating = None
+        if Verbose:
+            print("No average rating found for", url)
+    else:
+        average_rating = average_rating_element.get_text(strip=True)
 
     return {
         'average_rating': average_rating
@@ -210,7 +220,7 @@ def combine_data(movie_data, diary_data, diary_urls = None):
         for diary in diary_data:
             if movie['title'] == diary['title']:
                 combined_dict[movie['title']] = {**movie, **diary}
-                print(f'Found match for {movie["title"]}')
+                #print(f'Found match for {movie["title"]}')
                 break
         
     return combined_dict
@@ -252,6 +262,8 @@ def main():
     # diary_urls = get_diary_urls(profile_soup) #Page 1
 
     # next_page_url = get_next_page_url(profile_soup)
+
+    print("Scraping diary entries...")
 
     diary_urls = scrape_all_pages(profile_name)
     movie_urls = []
@@ -402,8 +414,9 @@ def main():
                 total_actors += 1
 
         #user's Rating
-        user_rating = rating_to_number(movie['user_rating'])
+        user_rating = movie['user_rating']
         if user_rating is not None:
+            user_rating = rating_to_number(user_rating)
             if user_rating > top_rated_movies[4]['rating']:
                 top_rated_movies[4] = {'title': movie['title'], 'rating': user_rating}
                 top_rated_movies.sort(key=lambda x: x['rating'], reverse=True)
@@ -420,7 +433,8 @@ def main():
                 top_average_rated_movies[4] = {'title': movie['title'], 'rating': average_rating}
                 top_average_rated_movies.sort(key=lambda x: x['rating'], reverse=True)
         else:
-            print("No average rating for", movie['title'])
+            if Verbose:
+                print("No average rating for", movie['title'])
 
         if user_rating is not None and average_rating is not None:
             # diff_from_average = {'title': movie['title'], 'diff': abs(user_rating - average_rating)}
