@@ -8,7 +8,7 @@ import re
 
 #Testing vars
 Verbose = False
-Testing = False
+Testing = True
 
 max_movies = 10
 
@@ -77,6 +77,15 @@ def diary_to_movie_url(diary_url):
 def clean_url(url):
     """Removes trailing '/digits/' from a URL."""
     return re.sub(r'/\d+/$', '/', url)
+
+# def get_profile(profile_name):
+#     profile_r = requests.get(f'{base_url}/{profile_name}/')
+#     if profile_r.status_code != 200:
+#         print("Error:", profile_r.status_code, "while fetching", f'{base_url}/{profile_name}/')
+#         return None
+#     else:
+#         soup = BeautifulSoup(profile_r.content, "html.parser")
+#         return soup
 
 def get_diary(profile_name):
 
@@ -178,11 +187,17 @@ def get_movie_data(url):
     #want to get user's rating and average rating
     # Extract rating (Letterboxd uses a span with 'rating' class)
 
+    #should be from directorlist
+    directors_soup = soup.select_one('.directorlist')
+    directors = directors_soup.get_text(strip=True) if directors_soup else "No Director Listed"
+
     return {
         'title': safe_get_text('#film-page-wrapper h1', 'Unknown Title'),
         'cast': safe_get_text('#tab-cast p', 'No Cast Listed'),
         'details': safe_get_text('#tab-details p', 'No Details Available'),
         'genres': safe_get_text('#tab-genres p', 'No Genres Available'),
+        'directors': directors,
+        
         'movie_url': url,
     }
 
@@ -210,6 +225,38 @@ def get_histogram_data(url):
         'average_rating': average_rating
     }
 
+def get_profile_data(url):
+    r = requests.get(url)
+    r.raise_for_status()  # Raise an exception for 4xx/5xx errors
+    soup = BeautifulSoup(r.content, "html.parser")
+
+    def safe_get_text(selector, default="N/A", separator=","):
+        element = soup.select_one(selector)
+        return element.get_text(separator, strip=True) if element else default
+
+    #favorite movies
+    favorite_elements = soup.select('.poster-list .film-poster')
+    count = 0
+    favourites = []
+    for element in favorite_elements:
+        title = element.get('data-film-slug', 'Unknown Title')
+        favourites.append(title)
+        count += 1
+        if count >= 4:
+            break
+
+    
+
+    return {
+        # 'name': safe_get_text('.profile-name'),
+        # 'bio': safe_get_text('.profile-bio'),
+        # 'location': safe_get_text('.profile-location'),
+        # 'website': safe_get_text('.profile-website'),
+        # 'joined': safe_get_text('.profile-joined'),
+        # 'last_active': safe_get_text('.profile-last-active'),
+        'favourites': favourites
+    }
+
 def combine_data(movie_data, diary_data, diary_urls = None):
 
     #find matching pairs
@@ -233,8 +280,9 @@ def combine_data(movie_data, diary_data, diary_urls = None):
 def main():
     global profile_name
 
-    profile_soup = None
 
+    #Get profile
+    profile_soup = None
     while profile_soup is None:
 
         if Testing:
@@ -255,14 +303,15 @@ def main():
         else:
             break
 
+
             
 
+    #Get profile info
+    print("Scraping profile info...")
+    profile_info = get_profile_data(f'{base_url}/{profile_name}/')
 
 
-    # diary_urls = get_diary_urls(profile_soup) #Page 1
-
-    # next_page_url = get_next_page_url(profile_soup)
-
+    #Get all movie and diary urls
     print("Scraping diary entries...")
 
     diary_urls = scrape_all_pages(profile_name)
@@ -270,19 +319,13 @@ def main():
     for url in diary_urls:
         movie_urls.append(diary_to_movie_url(url))
 
-    #print("Movie urlks:" , movie_urls)
-
     num_movies = len(movie_urls)
-    
     print(f'Found {num_movies} diary entries')
 
-    #print(diary_urls)
 
+
+    #Get data fopr each movie
     print("getting movie data...")
-
-
-
-    #Get movie data
     movie_count = 0
     movie_data = []
     for url in movie_urls:
@@ -355,20 +398,29 @@ def main():
 
     genre_count = {}
     actor_count = {}
+    director_count = {}
     
+    #to hold count, average rating, etc.
+    genre_dict = {}
+    actor_dict = {}
+    director_dict = {}
 
-    top_rated_actors = []
-    top_rated_genres = []
 
     max_above_average = {'title': 'None', 'diff': 0}
     max_below_average = {'title': 'None', 'diff': 0}
 
     top_rated_movies = []
     top_average_rated_movies = []
+    top_rated_actors = []
+    top_rated_genres = []
+    top_rated_directors = []
     #initialize top rated movies
     for i in range(5):
         top_rated_movies.append({'title': 'None', 'rating': 0})
         top_average_rated_movies.append({'title': 'None', 'rating': 0})
+        top_rated_actors.append({'actor': 'None', 'rating': 0})
+        top_rated_genres.append({'genre': 'None', 'rating': 0})
+        top_rated_directors.append({'director': 'None', 'rating': 0})
 
 
     #set data to a smaller list for testing
@@ -395,6 +447,13 @@ def main():
                 genre_count[genre] = 1
                 total_genres += 1
 
+            # if genre in genre_dict:
+            #     genre_dict[genre]['count'] += 1
+            #     genre_dict[genre]['average_rating'] += rating_to_number(movie['user_rating'])
+            # else:
+            #     genre_dict[genre] = {'count': 1, 'average_rating': rating_to_number(movie['user_rating'])}
+            #     total_genres += 1
+
 
         #Actors
         actors = movie['cast'].split(',')
@@ -413,10 +472,21 @@ def main():
                 actor_count[actor] = 1
                 total_actors += 1
 
-        #user's Rating
-        user_rating = movie['user_rating']
+        #Directors
+        #need to handle multiple directors
+        directors = movie['directors'].split(',')
+        for director in directors:
+            director = director.strip()
+            if director in director_count:
+                director_count[director] += 1
+            else:
+                director_count[director] = 1
+
+
+        #user's Rating 
+        user_rating = rating_to_number(movie['user_rating'])
         if user_rating is not None:
-            user_rating = rating_to_number(user_rating)
+            
             if user_rating > top_rated_movies[4]['rating']:
                 top_rated_movies[4] = {'title': movie['title'], 'rating': user_rating}
                 top_rated_movies.sort(key=lambda x: x['rating'], reverse=True)
@@ -450,6 +520,8 @@ def main():
                 max_below_average = below_average
             
 
+    # for genre in genre_dict:
+    #     genre_dict[genre]['average_rating'] = round(genre_dict[genre]['average_rating'] / genre_dict[genre]['count'], 1)
 
 
 
@@ -468,9 +540,15 @@ def main():
     for actor, count in actor_count.items():
         actor_percents[actor] = round(count / movie_count * 100,2)
 
+    director_percents = {}
+    for director, count in director_count.items():
+        director_percents[director] = round(count / movie_count * 100,2)
+
+
     #sort lists
     sorted_genres = sorted(genre_count.items(), key=lambda x: x[1], reverse=True)
     sorted_actors = sorted(actor_count.items(), key=lambda x: x[1], reverse=True)
+    sorted_directors = sorted(director_count.items(), key=lambda x: x[1], reverse=True)
 
     print("Your 5 most watched genres are:")
     for genre, count in sorted_genres[:5]:
@@ -479,6 +557,11 @@ def main():
     print("\nYour 5 most watched actors are:")
     for actor, count in sorted_actors[:5]:
         print(actor,": ", count, "movies", "(", actor_percents[actor], "%)")
+
+    print("\nYour 5 most watched directors are:")
+    for director, count in sorted_directors[:5]:
+        print(director,": ", count, "movies", "(", director_percents[director], "%)")
+
 
     print("\nYour top 5 rated movies are:")
     for movie in top_rated_movies:
